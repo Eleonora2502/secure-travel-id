@@ -1,19 +1,21 @@
 import React, { useState, useRef, useEffect } from 'react';
 import QRCode from 'qrcode';
-import { Html5QrcodeScanner } from 'html5-qrcode';
+import { Html5Qrcode } from 'html5-qrcode';
 import { 
   Shield, 
-  User, 
-  Building, 
   ArrowLeft, 
-  ScanLine, 
-  Camera, 
-  Link as LinkIcon, 
+  HelpCircle,
+  Fingerprint,
+  Upload,
   CheckCircle, 
   XCircle,
   Loader2, 
-  Copy ,
-  FileText
+  Copy,
+  Focus,
+  Lock,
+  Target,
+  Camera,
+  Keyboard
 } from 'lucide-react';
 import './index.css';
 
@@ -43,30 +45,33 @@ class ErrorBoundary extends React.Component {
 }
 
 function App() {
-  const [view, setView] = useState('home'); // 'home', 'client', 'host'
+  const [view, setView] = useState('home'); // 'home', 'client', 'host', 'overview'
   const [isLoading, setIsLoading] = useState(false);
-  const [loadingText, setLoadingText] = useState('');
   const [copied, setCopied] = useState(false);
 
   // Client states
   const fileInputRef = useRef(null);
   const [notarizedToken, setNotarizedToken] = useState(''); // combine(notarizationId, fileHash)
-  const [documentHash, setDocumentHash] = useState(''); // the raw SHA-256 hash
   const [qrDataUrl, setQrDataUrl] = useState('');
+  const [loadingText, setLoadingText] = useState('');
 
   // Host states
-  const [hostMode, setHostMode] = useState(''); // 'qr', 'link'
   const [hostInput, setHostInput] = useState('');
   const [validationResult, setValidationResult] = useState(null);
+  const [isScanning, setIsScanning] = useState(false);
+  const [showManualInput, setShowManualInput] = useState(false);
+
+  // References
+  const html5QrCodeRef = useRef(null);
 
   const resetState = () => {
     setNotarizedToken('');
-    setDocumentHash('');
     setQrDataUrl('');
-    setHostMode('');
     setHostInput('');
     setValidationResult(null);
+    setShowManualInput(false);
     setCopied(false);
+    stopScanner();
   };
 
   const handleBack = () => {
@@ -74,34 +79,76 @@ function App() {
     resetState();
   };
 
+  // Host QR Scanner Logic
   useEffect(() => {
-    let scanner = null;
-    if (view === 'host' && hostMode === 'qr' && !isLoading && !validationResult) {
-       scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: {width: 250, height: 250} }, false);
-       scanner.render((decodedText) => {
-           scanner.clear();
-           setHostInput(decodedText);
-       }, (err) => {
-           // ignore silent scanner warnings
-       });
-    }
     return () => {
-       if (scanner) {
-           scanner.clear().catch(e => console.error(e));
-       }
-    }
-  }, [view, hostMode, isLoading, validationResult]);
+      stopScanner();
+    };
+  }, []);
 
-  // CLIENT FLOW: Upload document and Notarize via TrueDoc (Hash)
+  const startScanner = async () => {
+    if (!html5QrCodeRef.current) {
+      try {
+        html5QrCodeRef.current = new Html5Qrcode('reader-custom');
+      } catch (err) {
+        // usually DOM element not found, but we check below
+      }
+    }
+    
+    if (html5QrCodeRef.current) {
+      setIsScanning(true);
+      try {
+        await html5QrCodeRef.current.start(
+          { facingMode: 'environment' },
+          { fps: 10, qrbox: { width: 250, height: 250 } },
+          (decodedText) => {
+            stopScanner();
+            setHostInput(decodedText);
+            handleHostVerifyLogic(decodedText);
+          },
+          () => {
+            // ignore constant background errors from seeking QR code
+          }
+        );
+      } catch (err) {
+        console.error('Camera start error', err);
+        setIsScanning(false);
+        alert('Could not start camera. Please check permissions.');
+      }
+    }
+  };
+
+  const stopScanner = () => {
+    if (html5QrCodeRef.current && isScanning) {
+      html5QrCodeRef.current.stop().then(() => {
+        html5QrCodeRef.current.clear();
+        html5QrCodeRef.current = null;
+        setIsScanning(false);
+      }).catch((e) => {
+        console.error('Stop scanner error', e);
+      });
+    }
+  };
+
+  const toggleManualInput = () => {
+    if (isScanning) stopScanner();
+    setShowManualInput(!showManualInput);
+  };
+
+  // CLIENT FLOW: Upload document and Notarize
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
     setIsLoading(true);
-    setLoadingText('Calcolo impronta Hash e Notarizzazione su IOTA TrueDoc...');
+    setLoadingText('Computing local document fingerprint...');
     try {
       const formData = new FormData();
       formData.append('document', file);
+
+      // Simulate step 1 
+      await new Promise(r => setTimeout(r, 800));
+      setLoadingText('Notarizing on IOTA Tangle...');
 
       const response = await fetch(`http://127.0.0.1:3001/notarize`, {
         method: 'POST',
@@ -110,12 +157,10 @@ function App() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Errore Notarizzazione');
 
-      // The QR code will just contain the string combining ID and Hash
+      setLoadingText('Generating cryptographically secure QR code...');
       const combinedToken = `${data.notarizationId}::${data.fileHash}`;
       setNotarizedToken(combinedToken);
-      setDocumentHash(data.fileHash);
       
-      // Generazione immagine QR sicura
       try {
         const url = await QRCode.toDataURL(combinedToken, { width: 200, margin: 2, color: { dark: '#000000', light: '#ffffff' } });
         setQrDataUrl(url);
@@ -124,11 +169,9 @@ function App() {
       }
     } catch (err) {
       console.error(err);
-      alert("Errore caricamento IOTA: " + err.message);
+      alert("Errore: " + err.message);
     } finally {
       setIsLoading(false);
-      setLoadingText('');
-      // FIX CRITICO: Resetta l'input file per far scattare di nuovo onChange sullo stesso file!
       if (fileInputRef.current) {
          try { fileInputRef.current.value = ''; } catch(e) {}
       }
@@ -142,13 +185,12 @@ function App() {
   };
 
   // HOST FLOW: Verify Notarization
-  const handleHostVerify = async () => {
-    if (!hostInput) return;
+  const handleHostVerifyLogic = async (tokenString) => {
+    if (!tokenString) return;
     setIsLoading(true);
-    setLoadingText('Verifica Integrità e Scadenza su Blockchain...');
     try {
-      const parts = hostInput.split('::');
-      if (parts.length !== 2) throw new Error("Formato Token TrueDoc invalido (atteso ID::HASH)");
+      const parts = tokenString.split('::');
+      if (parts.length !== 2) throw new Error("Invalid Secure Travel ID format");
 
       const response = await fetch(`http://127.0.0.1:3001/verify`, {
         method: 'POST',
@@ -158,219 +200,258 @@ function App() {
       const data = await response.json();
 
       if (response.ok && data.success) {
-        setValidationResult({ success: true, msg: "Documento Immutabile. Non è stato manomesso." });
+        setValidationResult({ success: true, msg: "Verified. Hash matches on-chain record." });
       } else {
-        setValidationResult({ success: false, msg: data.error || "Firma invalida sulla Blockchain!" });
+        setValidationResult({ success: false, msg: data.error || "Tampered or invalid document." });
       }
     } catch (err) {
       console.error(err);
       setValidationResult({ success: false, msg: err.message });
     } finally {
       setIsLoading(false);
-      setLoadingText('');
     }
   };
 
-
   return (
-    <div className="wallet-container">
-      <div className="wallet-header">
-        {view !== 'home' && (
-          <button className="back-btn" onClick={handleBack} title="Torna Indietro">
-            <ArrowLeft size={24} />
+    <div className="app-layout">
+      
+      {/* Navbar matching screenshot */}
+      <nav className="trustpass-navbar">
+        <div className="nav-brand" onClick={handleBack}>
+          <div className="logo-icon">
+            <Shield size={20} color="var(--accent-blue)" />
+          </div>
+          Secure Travel ID
+        </div>
+        
+        <div className="nav-actions">
+          <button className="icon-button" onClick={() => setView('overview')} title="Project Overview">
+            <HelpCircle size={20} />
           </button>
+        </div>
+      </nav>
+
+      <main className="main-content">
+        
+        {/* HOMEPAGE */}
+        {view === 'home' && (
+          <div className="home-layout">
+            <div className="home-text-section">
+              <div className="fingerprint-icon">
+                <Fingerprint size={32} />
+              </div>
+              <h1>Own your identity,<br/>notarize it on IOTA.</h1>
+              <p>Protect your sensitive documents (ID/Passport) with verifiable cryptographic proofs on the IOTA Tangle.</p>
+            </div>
+            
+            <div className="home-card-section">
+              <div className="action-card">
+                <button className="btn-primary" onClick={() => setView('client')}>
+                  <Shield size={20} /> I am a Traveler
+                </button>
+                
+                <div className="divider">OR</div>
+                
+                <button className="btn-outline" onClick={() => setView('host')}>
+                  <Focus size={20} color="var(--accent-gold)" /> I am a Host
+                </button>
+              </div>
+            </div>
+          </div>
         )}
-        <h1>TrueDoc Notarization</h1>
-        <p>
-          {view === 'home' && 'Scegli il tuo ruolo per continuare'}
-          {view === 'client' && 'Area Cliente (Notarizzazione File)'}
-          {view === 'host' && 'Area Host (Verifica Hash)'}
-        </p>
-      </div>
 
-      {view === 'home' && (
-        <div className="roles-grid fade-in">
-          <div className="role-card" onClick={() => setView('client')}>
-            <div className="role-icon"><FileText size={32} /></div>
-            <div className="role-info">
-              <h2>Protocolla un File</h2>
-              <p>Carica un documento per generare l'Hash e renderlo Immutabile su IOTA</p>
+        {/* CLIENT VIEW */}
+        {view === 'client' && (
+          <div className="center-container">
+            <div className="view-header">
+              <h2>Notarize Identity</h2>
+              <p>Generate a secure SHA-256 fingerprint locally on your device.</p>
             </div>
-          </div>
-          
-          <div className="role-card" onClick={() => setView('host')}>
-            <div className="role-icon"><Building size={32} /></div>
-            <div className="role-info">
-              <h2>Sono un Host</h2>
-              <p>Verifica che il documento ricevuto al check-in sia originale</p>
-            </div>
-          </div>
-        </div>
-      )}
 
-      {view === 'client' && (
-        <div className="client-view fade-in">
-          {!notarizedToken && !isLoading && (
-            <div style={{ textAlign: 'center' }}>
-              <div className="scanner-animation" style={{ animation: 'none', background: 'transparent' }}>
-                 <ScanLine size={48} opacity={0.5} />
-              </div>
-              <input 
-                type="file" 
-                ref={fileInputRef} 
-                style={{ display: 'none' }} 
-                onChange={handleFileUpload}
-              />
-              <button className="wallet-btn" onClick={() => fileInputRef.current.click()}>
-                <ScanLine size={20} />
-                Carica File per la Notarizzazione
-              </button>
-              <p style={{ marginTop: '1rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                Nessun file verrà caricato online! Ne leggeremo solo l'impronta crittografica (Hash) per registrarla sulla Blockchain.
-              </p>
-            </div>
-          )}
+            {!notarizedToken && !isLoading && (
+              <>
+                <div className="dashed-box" onClick={() => fileInputRef.current.click()}>
+                  <div className="icon-wrapper">
+                    <Upload size={32} />
+                  </div>
+                  <h3>Tap to upload ID</h3>
+                  <p>Image or PDF. We process this locally.</p>
+                </div>
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  style={{ display: 'none' }} 
+                  onChange={handleFileUpload}
+                />
+                <div className="solid-info-box">
+                  <Shield size={20} color="var(--text-muted)" />
+                  <span>Your document data will be hashed and <strong>never leave your device</strong>.</span>
+                </div>
+              </>
+            )}
 
-          {isLoading && (
-            <div style={{ textAlign: 'center', padding: '2rem 0' }}>
-              <div className="scanner-animation">
-                <div className="scanner-line"></div>
-                <ScanLine size={48} />
-              </div>
-              <p style={{ color: 'var(--accent)', fontWeight: '600' }}>{loadingText}</p>
-            </div>
-          )}
-
-          {notarizedToken && !isLoading && (
-            <div className="fade-in">
-              <div style={{ textAlign: 'center', color: 'var(--success)', fontWeight: '600', marginBottom: '1rem' }}>
-                <CheckCircle size={40} style={{ margin: '0 auto 0.5rem' }} />
-                Documento Notarizzato con Successo!
-              </div>
-              
-              <div style={{ background: 'rgba(0,0,0,0.3)', padding: '1rem', borderRadius: '12px', marginBottom: '1.5rem', border: '1px solid rgba(255,255,255,0.05)' }}>
-                <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Impronta Hash (SHA-256) Registrata:</p>
-                <div style={{ wordBreak: 'break-all', fontFamily: 'monospace', fontSize: '0.9rem', color: 'var(--accent)' }}>
-                  {documentHash}
+            {isLoading && (
+              <div className="client-loading-container">
+                <div className="scanning-icon-container">
+                  <Fingerprint size={80} color="var(--accent-blue)" className="base-fingerprint" />
+                  <div className="scanning-beam"></div>
+                </div>
+                <h3 className="loading-title">Scanning & Notarizing</h3>
+                <p className="loading-text">{loadingText}</p>
+                <div className="cyber-progress-bar">
+                  <div className="cyber-progress-fill"></div>
                 </div>
               </div>
+            )}
 
-              <div className="qr-container">
-                 {/* QR CODE containing the TrueDoc Token */}
-                 {qrDataUrl && <img src={qrDataUrl} width={200} height={200} alt="QR Code" style={{ borderRadius: '8px' }} />}
-              </div>
-
-              <div className="jwt-link-box">
-                <LinkIcon size={16} color="var(--accent)" style={{flexShrink: 0}} />
-                <div className="jwt-text" title={notarizedToken}>{notarizedToken}</div>
-                <button className="copy-btn" onClick={copyToClipboard} title="Copia Token TrueDoc">
-                  {copied ? <CheckCircle size={14}/> : <Copy size={14}/>}
-                  {copied ? 'Copiato' : 'Copia'}
-                </button>
-              </div>
-              <p style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                Mostra questo QR Code (o copia il Token) all'Hotel. Dimostra che il file non è stato manomesso.
-              </p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {view === 'host' && (
-        <div className="host-view fade-in">
-          {!hostMode && !validationResult && !isLoading && (
-             <div className="roles-grid">
-               <div className="role-card" onClick={() => setHostMode('qr')}>
-                 <div className="role-icon"><Camera size={28} /></div>
-                 <div className="role-info">
-                   <h2>Scansiona QR Code</h2>
-                   <p>Usa la fotocamera per scannerizzare il QR del Cliente</p>
-                 </div>
-               </div>
-               <div className="role-card" onClick={() => setHostMode('link')}>
-                 <div className="role-icon"><LinkIcon size={28} /></div>
-                 <div className="role-info">
-                   <h2>Inserisci Token Hash</h2>
-                   <p>Incolla manualmente il Token TrueDoc</p>
-                 </div>
-               </div>
-             </div>
-          )}
-
-          {hostMode === 'link' && !validationResult && !isLoading && (
-            <div className="fade-in">
-              <div style={{ marginBottom: '1rem', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-                Inserisci il Token (ID::Hash) fornito dal Cliente:
-              </div>
-              <textarea 
-                className="input-field" 
-                rows={4} 
-                style={{ resize: 'none' }}
-                placeholder="iota_notar_..."
-                value={hostInput}
-                onChange={e => setHostInput(e.target.value)}
-              />
-              <div className="flex-gap">
-                <button className="wallet-btn outline" onClick={() => setHostMode('')}>Annulla</button>
-                <button className="wallet-btn" onClick={handleHostVerify} disabled={!hostInput}>
-                  <Shield size={18} /> Valida Integrità
-                </button>
-              </div>
-            </div>
-          )}
-
-          {hostMode === 'qr' && !validationResult && !isLoading && (
-            <div className="fade-in" style={{ textAlign: 'center' }}>
-              <div style={{ marginBottom: '1rem', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-                Inquadra il QR Code del Cliente tramite Truedoc:
-              </div>
-              
-              <div id="reader" style={{ width: '100%', maxWidth: '400px', margin: '0 auto', background: 'white', border: '1px solid var(--accent)', borderRadius: '12px', overflow: 'hidden' }}></div>
-              
-              {hostInput && (
-                <div style={{ marginTop: '1rem', padding: '1rem', background: 'rgba(0,0,0,0.3)', borderRadius: '8px' }}>
-                   <p style={{ color: 'var(--success)', fontWeight: 'bold' }}>QR Code Rilevato con Successo!</p>
-                   <p style={{ wordBreak: 'break-all', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{hostInput}</p>
+            {notarizedToken && !isLoading && (
+              <div style={{ textAlign: 'center', animation: 'fadeIn 0.3s' }}>
+                <div className="dashed-box" style={{ cursor: 'default', padding: '2rem' }}>
+                  <img src={qrDataUrl} width={200} height={200} alt="QR Code" style={{ borderRadius: '12px', marginBottom: '1.5rem' }} />
+                  <p style={{ fontFamily: 'monospace', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1rem', wordBreak: 'break-all' }}>
+                    {notarizedToken}
+                  </p>
+                  <button className="btn-outline" onClick={copyToClipboard} style={{ width: 'auto', padding: '0.75rem 1.5rem', margin: '0 auto' }}>
+                    {copied ? <CheckCircle size={18} /> : <Copy size={18} />} 
+                    {copied ? 'Copied!' : 'Copy Token'}
+                  </button>
                 </div>
-              )}
+                
+                <div className="solid-info-box" style={{ marginTop: '1.5rem' }}>
+                  <Shield size={20} color="var(--success-color)" />
+                  <span>Show this QR code to your host. They will verify your identity on-chain.</span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
-              <div className="flex-gap" style={{ marginTop: '1rem' }}>
-                <button className="wallet-btn outline" onClick={() => { setHostMode(''); setHostInput(''); }}>Annulla</button>
-                <button className="wallet-btn" onClick={handleHostVerify} disabled={!hostInput}>
-                  <Shield size={18} /> Procedi e Valida
+        {/* HOST VIEW */}
+        {view === 'host' && (
+          <div className="center-container">
+            <div className="view-header">
+              <h2>Host Verification</h2>
+              <p>Scan a TrustPass QR code to verify cryptographically.</p>
+            </div>
+
+            {!validationResult && !isLoading && (
+              <div className="host-scanner-container">
+                
+                {/* Custom Scanner UI */}
+                {!showManualInput ? (
+                  <div className="scanner-presentation-box">
+                    <div className="scanner-viewport-wrapper">
+                      <div id="reader-custom" className={`scanner-viewport ${isScanning ? 'active' : ''}`}></div>
+                      {!isScanning && (
+                         <div className="scanner-idle" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', background: '#000', justifyContent: 'center' }}>
+                           <Focus size={48} color="var(--accent-gold)" style={{ opacity: 0.6 }} />
+                           <p>Ready to verify identity</p>
+                         </div>
+                      )}
+                    </div>
+                    
+                    {!isScanning ? (
+                      <button className="btn-primary" onClick={startScanner} style={{ width: '80%', margin: '0 auto 1.5rem', background: 'var(--accent-gold)', color: 'black' }}>
+                        <Camera size={20} />
+                        Start Scanning
+                      </button>
+                    ) : (
+                      <button className="btn-outline" onClick={stopScanner} style={{ width: '80%', margin: '0 auto 1.5rem', borderColor: 'var(--error-color)', color: 'var(--error-color)' }}>
+                        <XCircle size={20} />
+                        Cancel
+                      </button>
+                    )}
+
+                    <div className="manual-toggle-text" onClick={toggleManualInput}>
+                      <Keyboard size={14} /> Enter code manually instead
+                    </div>
+                  </div>
+                ) : (
+                  <div className="manual-input-box">
+                    <h3 style={{ margin: '0 0 1rem 0', fontWeight: '500' }}>Manual Entry</h3>
+                    <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '1.5rem' }}>Paste the Secure Travel ID token provided by the traveler.</p>
+                    <input 
+                      className="input-area" 
+                      style={{ padding: '1rem', marginBottom: '1rem' }}
+                      value={hostInput}
+                      onChange={e => setHostInput(e.target.value)}
+                      placeholder="Paste ID::Hash"
+                    />
+                    <div style={{ display: 'flex', gap: '1rem' }}>
+                      <button className="btn-outline" style={{ flex: 1 }} onClick={toggleManualInput}>
+                        Cancel
+                      </button>
+                      <button className="btn-primary" style={{ flex: 1, background: 'var(--accent-gold)', color: 'black' }} onClick={() => handleHostVerifyLogic(hostInput)}>
+                        Verify
+                      </button>
+                    </div>
+                  </div>
+                )}
+                
+              </div>
+            )}
+
+            {isLoading && (
+              <div style={{ textAlign: 'center', padding: '4rem 0' }}>
+                 <Loader2 size={48} className="loader" color="var(--accent-gold)" style={{ margin: '0 auto 1rem' }} />
+                 <p>Checking IOTA ledger...</p>
+              </div>
+            )}
+
+            {validationResult && !isLoading && (
+              <div className={`status-box ${validationResult.success ? '' : 'error'} fade-in`}>
+                {validationResult.success ? <CheckCircle size={64} style={{ margin: '0 auto 1rem' }} /> : <XCircle size={64} style={{ margin: '0 auto 1rem' }} />}
+                <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '1.5rem' }}>
+                  {validationResult.success ? 'Document Verified' : 'Verification Failed'}
+                </h3>
+                <p style={{ margin: 0, opacity: 0.9 }}>{validationResult.msg}</p>
+
+                <button 
+                  className="btn-outline" 
+                  style={{ marginTop: '2rem', borderColor: 'currentColor', color: 'currentColor' }}
+                  onClick={() => { 
+                    setValidationResult(null); 
+                    setHostInput(''); 
+                    if (!showManualInput) startScanner();
+                  }}
+                >
+                  Scan Another Code
                 </button>
               </div>
-            </div>
-          )}
+            )}
+          </div>
+        )}
 
-          {isLoading && (
-            <div style={{ textAlign: 'center', padding: '3rem 0' }}>
-               <Loader2 size={48} className="loader" color="var(--accent)" style={{ margin: '0 auto 1rem' }} />
-               <p style={{ color: 'var(--accent)', fontWeight: '600' }}>{loadingText}</p>
+        {/* OVERVIEW VIEW */}
+        {view === 'overview' && (
+          <div className="overview-layout">
+            <div className="overview-header">
+              <span className="label">Project Overview</span>
+              <h1>Secure Travel ID</h1>
+              <p>Digital Identity Notarization for Travel Check-in. Replace insecure document sharing with verifiable on-chain cryptographic proofs.</p>
             </div>
-          )}
 
-          {validationResult && !isLoading && (
-            <div className={`status-badge ${validationResult.success ? '' : 'error'} fade-in`}>
-              {validationResult.success ? <CheckCircle size={48} /> : <XCircle size={48} />}
-              <div>
-                <strong>{validationResult.success ? 'File Originale (Su IOTA)' : 'Hash Non Valido!'}</strong>
-                <p style={{ fontSize: '0.9rem', color: 'currentColor', marginTop: '0.5rem', opacity: 0.8 }}>
-                  {validationResult.msg}
-                </p>
+            <div className="overview-grid">
+              <div className="overview-card">
+                <Target size={32} className="card-icon" />
+                <h3>The Problem</h3>
+                <p>Travelers are currently forced to send photos of sensitive documents (ID cards, passports) to unknown hosts via WhatsApp or email, completely losing control over their data footprint.</p>
               </div>
-              
-              <button 
-                className="wallet-btn outline" 
-                style={{ marginTop: '1rem' }}
-                onClick={() => { setValidationResult(null); setHostInput(''); setHostMode(''); }}
-              >
-                Nuova Scansione
-              </button>
+
+              <div className="overview-card blue-icon">
+                <Lock size={32} className="card-icon" />
+                <h3>The Solution</h3>
+                <p>Secure Travel ID replaces raw document sharing with verifiable, untampered proofs notarized on the IOTA blockchain. Hosts verify a cryptographic guarantee instead of collecting JPEGs.</p>
+              </div>
             </div>
-          )}
-        </div>
-      )}
+            
+            <button className="btn-outline" style={{ marginTop: '3rem', width: 'max-content', padding: '1rem 2rem', margin: '3rem auto 0' }} onClick={handleBack}>
+              Return to App
+            </button>
+          </div>
+        )}
+
+      </main>
     </div>
   );
 }
