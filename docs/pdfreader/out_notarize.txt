@@ -1,0 +1,1783 @@
+TutorialsWorkshopsIOTA Notarization Workshop
+Implementing Proof of
+Integrity and Auditability
+with IOTA Notarization
+Overview
+This workshop tutorial guides you through implementing blockchain-based
+document notarization using IOTA's Notarization framework. You'll learn how to
+create immutable proof of document existence, build audit trails for regulatory
+compliance, and verify document integrity using both dynamic (mutable) and
+locked (immutable) notarization strategies.
+Objective: Apply notarization patterns for audit trails, document authenticity, and
+state verification using dynamic/locked and static strategies on the IOTA ledger.
+Use Cases:
+Prove that a document or dataset existed at a certain time and wasn't altered
+Log regulatory filings or records with cryptographic proof of authenticity
+Generate public audit trails for decisions, votes, or contract updates
+Prerequisites
+To complete this workshop, ensure you have the following prerequisites:
+Node.js >= v22.14.0
+npx >= 11.4.2
+iota CLI >= 1.5.0
+Basic knowledge of TypeScript and REST APIs
+Familiarity with blockchain concepts
+Architecture Overview
+The IOTA Notarization system provides two main types of notarizations:
+Dynamic Notarizations:
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      1/52
+----------------Page (0) Break----------------
+Mutable - content and metadata can be updated
+Transferable between wallets (with optional locks)
+Tracks version history with timestamps
+Ideal for evolving documents like contracts, compliance records
+Locked Notarizations:
+Immutable - cannot be modified or transferred
+Permanent blockchain record
+Optional time-based delete locks
+Perfect for legal documents, certificates, final records
+Both types store SHA-256 hashes of your content on-chain, providing
+cryptographic proof of existence and integrity.
+Set up Development Environment and
+Publish the IOTA Notarization Package
+Step 1: Set Up the IOTA Network
+First, configure your IOTA client for the desired network. We'll use testnet for this
+tutorial, but the same process applies to devnet or localnet.
+Check Available Environments:
+Switch to Testnet:
+Check Your Wallet Addresses:
+NOTE
+iota client envs
+iota client switch --env testnet(or your desired network)
+iota client addresses
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      2/52
+----------------Page (1) Break----------------
+You will be publishing notarizations package from this address, so ensure
+you have access to its private key(Better to use the address to which you
+have browser iota wallet setup).
+Request Test Funds:
+Step 2: Publish the IOTA Notarization Package
+Now we'll deploy the Notarization smart contract package to the testnet.
+NOTE
+For your reference do visit the notarization documentation for more
+details and set up.
+Clone the IOTA Notarization Repository
+Switch to Stable Version
+Check the releases and switch to the latest stable tag:
+Publish the Package
+The last line of output will display your package ID. Save this for later:
+Verify Package on Explorer
+Open the IOTA Explorer to verify your package deployment:
+iota client faucet
+git clone https://github.com/iotaledger/notarization.git
+cd notarization
+git checkout v0.1.6  # Use the latest stable version
+./notarization-move/scripts/publish_package.sh
+Package ID: 0xc953.....
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      3/52
+----------------Page (2) Break----------------
+Step 3: Set Up the Backend Service
+Now let's set up the Node.js backend service that will interact with our deployed
+notarization package.
+Create Project Structure
+Initialize Project
+Install Dependencies
+Create Project Structure
+File/Folder structure
+https://explorer.iota.org/object/<your-package-id>?network=testnet
+mkdir iota-notarization-backend
+cd iota-notarization-backend
+npm init -y
+npm install @iota/iota-sdk @iota/notarization @noble/ed25519 bech32 
+cors dotenv express multer
+npm install -D @types/cors @types/express @types/multer @types/node 
+nodemon ts-node typescript
+mkdir -p src/controllers src/routes src/services src/utils
+.
+├── Api-docs.md
+├── package-lock.json
+├── package.json
+├── pnpm-lock.yaml
+├── Readme.md
+├── src
+│   ├── controllers
+│   │   └── notarizationController.ts
+│   ├── routes
+│   │   └── notarizationRoutes.ts
+│   ├── server.ts
+│   ├── services
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      4/52
+----------------Page (3) Break----------------
+Configure TypeScript
+Create tsconfig.json:
+Environment Configuration:
+Create .env file:
+Package Configuration:
+Update package.json with scripts:
+│   │   ├── notarizationService.ts
+│   │   └── walletService.ts
+│   └── utils
+│       └── crypto.ts
+└── tsconfig.json
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "lib": ["ES2020"],
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
+# IOTA Configuration
+IOTA_NOTARIZATION_PKG_ID=
+NETWORK_URL=
+# Wallet Configuration (Generate one or use existing) IOTA wallet 
+private key
+PRIVATE_KEY=
+# Server Configuration
+PORT=3001
+{
+  "name": "iota-notarization-backend",
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      5/52
+----------------Page (4) Break----------------
+Let's Implement Core Services
+Crypto Utilities - File Hashing Foundation
+What We're Building: Cryptographic utilities for generating and validating SHA-
+256 hashes.
+Why We Need This:
+Documents are stored on blockchain as cryptographic hashes, not the actual
+content
+SHA-256 creates unique digital fingerprints that are impossible to reverse-
+engineer
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "nodemon src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "test": "echo \"Run tests with Postman\" && exit 0"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@iota/iota-sdk": "^1.6.1",
+    "@iota/notarization": "^0.1.6",
+    "@noble/ed25519": "^3.0.0",
+    "bech32": "^2.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "multer": "^2.0.2"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "@types/multer": "^2.0.0",
+    "@types/node": "^24.6.2",
+    "nodemon": "^3.1.10",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      6/52
+----------------Page (5) Break----------------
+We need to validate hash formats before sending to blockchain to prevent
+errors
+Postman collection for testing the API endpoints
+Testing File Hash Generation Endpoint
+The file upload API endpoint in Postman showing how a document is processed
+before notarization — the response returns the generated SHA-256 hash and
+associated file metadata, ready to be registered on-chain.
+Implementation- Create src/utils/crypto.ts:
+workshop-module-12/iota-notarization-backend/src/utils/crypto.ts
+import { createHash } from 'crypto';
+export class CryptoUtils {
+  /**
+   * Compute SHA-256 hash of a file buffer or string
+   */
+  static computeSHA256(data: Buffer | string): string {
+    const hash = createHash('sha256');
+    
+    if (Buffer.isBuffer(data)) {
+      hash.update(data);
+    } else {
+      hash.update(data, 'utf8');
+    }
+    
+    return hash.digest('hex');
+  }
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      7/52
+----------------Page (6) Break----------------
+See full example on GitHub
+Outcome:
+Cryptographic hash generation for document fingerprinting
+File upload support with buffer processing
+Hash format validation to prevent blockchain errors
+Foundation for document integrity verification
+Wallet Service - Blockchain Connection Layer
+What We're Building: Secure wallet management and blockchain connectivity.
+Why We Need This:
+All blockchain operations require a wallet for signing transactions
+We need to handle private keys securely in multiple formats
+Automatic testnet faucet integration for development
+IOTA client initialization for blockchain interactions
+Implementation- Create src/services/walletService.ts:
+workshop-module-12/iota-notarization-backend/src/services/walletService.ts
+  /**
+   * Compute file hash from Buffer (for uploaded files)
+   */
+  static computeFileHash(fileBuffer: Buffer): string {
+    return this.computeSHA256(fileBuffer);
+  }
+  /**
+   * Validate if a string is a valid SHA-256 hash
+   */
+  static isValidSHA256Hash(hash: string): boolean {
+    return /^[a-f0-9]{64}$/i.test(hash);
+  }
+}
+import { Ed25519Keypair } from "@iota/iota-sdk/keypairs/ed25519";
+import { Ed25519KeypairSigner } from "@iota/iota-interaction-
+ts/node/test_utils";
+import { IotaClient, getFullnodeUrl } from "@iota/iota-sdk/client";
+import { getFaucetHost, requestIotaFromFaucetV0 } from "@iota/iota-
+sdk/faucet";
+import { decodeIotaPrivateKey} from "@iota/iota-sdk/cryptography";
+import dotenv from "dotenv";
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      8/52
+----------------Page (7) Break----------------
+dotenv.config();
+export class WalletService {
+  private keypair: Ed25519Keypair;
+  private signer: Ed25519KeypairSigner;
+  private iotaClient: IotaClient;
+  constructor() {
+    const privateKey = process.env.PRIVATE_KEY;
+    
+    if (privateKey) {
+      try {
+        console.log(" Processing private key from environment...");
+        
+        // Check if it's a bech32 key (starts with iotaprivkey1)
+        if (privateKey.startsWith('iotaprivkey1')) {
+          console.log(" Using IOTA SDK's bech32 key decoder...");
+          
+          // Use IOTA SDK's built-in decoder for bech32 keys
+          const { schema, secretKey } = 
+decodeIotaPrivateKey(privateKey);
+          
+          console.log(` Key details: Schema=${schema}, Secret key 
+length=${secretKey.length} bytes`);
+          
+          if (schema !== 'ED25519') {
+            throw new Error(`Unsupported key schema: ${schema}. Only 
+ED25519 is supported.`);
+          }
+          
+          if (secretKey.length !== 32) {
+            throw new Error(`Invalid secret key length: 
+${secretKey.length} bytes. Expected 32 bytes.`);
+          }
+          
+          this.keypair = Ed25519Keypair.fromSecretKey(secretKey);
+          console.log("✅ Successfully loaded bech32 private key");
+        } else {
+          console.log(" Using base64 private key directly...");
+          const privateKeyBytes = Buffer.from(privateKey, 'base64');
+          
+          if (privateKeyBytes.length !== 32) {
+            throw new Error(`Invalid base64 key length: 
+${privateKeyBytes.length} bytes. Expected 32 bytes.`);
+          }
+          
+          this.keypair = 
+Ed25519Keypair.fromSecretKey(privateKeyBytes);
+          console.log("✅ Successfully loaded base64 private key");
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      9/52
+----------------Page (8) Break----------------
+        }
+        
+        console.log(`✅ Using existing wallet: ${this.getAddress()}`);
+        
+      } catch (error) {
+        console.error("❌ Invalid private key in environment:", 
+error);
+        console.log(" Generating new keypair...");
+        this.keypair = this.generateNewKeypair();
+      }
+    } else {
+      console.log(" No private key found, generating new 
+keypair...");
+      this.keypair = this.generateNewKeypair();
+    }
+    this.signer = new Ed25519KeypairSigner(this.keypair);
+    this.iotaClient = new IotaClient({ 
+      url: process.env.NETWORK_URL || getFullnodeUrl("testnet")
+    });
+    console.log(`✅ Wallet initialized for address: 
+${this.getAddress()}`);
+  }
+  private generateNewKeypair(): Ed25519Keypair {
+    const keypair = Ed25519Keypair.generate();
+    const bech32PrivateKey = keypair.getSecretKey();
+    
+    console.log(" Generated NEW keypair - SAVE THESE FOR 
+PRODUCTION:");
+    console.log("Private Key (bech32):", bech32PrivateKey);
+    
+    try {
+      const { secretKey } = decodeIotaPrivateKey(bech32PrivateKey);
+      console.log("Private Key (base64 - 32 bytes):", 
+Buffer.from(secretKey).toString('base64'));
+    } catch (error) {
+      console.log("Private Key (base64): [Conversion failed]");
+    }
+    
+    console.log("Public Key:", keypair.getPublicKey().toBase64());
+    console.log("Address:", keypair.toIotaAddress());
+    console.log("⚠  Add PRIVATE_KEY to your .env file for production 
+use!");
+    console.log("   Recommended: Use the bech32 format above");
+    
+    return keypair;
+  }
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      10/52
+----------------Page (9) Break----------------
+  getKeypair(): Ed25519Keypair {
+    return this.keypair;
+  }
+  getSigner(): Ed25519KeypairSigner {
+    return this.signer;
+  }
+  getIotaClient(): IotaClient {
+    return this.iotaClient;
+  }
+  getAddress(): string {
+    return this.keypair.toIotaAddress();
+  }
+  async ensureFunds(): Promise<void> {
+    try {
+      const balance = await this.iotaClient.getBalance({
+        owner: this.getAddress(),
+      });
+      if (balance.totalBalance === "0") {
+        console.log(" Requesting faucet funds...");
+        await requestIotaFromFaucetV0({
+          host: getFaucetHost("testnet"),
+          recipient: this.getAddress(),
+        });
+        
+        // Wait for funds to be available
+        console.log("⏳ Waiting for faucet transaction...");
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        
+        const newBalance = await this.iotaClient.getBalance({
+          owner: this.getAddress(),
+        });
+        console.log(`✅ Received ${newBalance.totalBalance} IOTA 
+tokens`);
+      } else {
+        console.log(`✅ Wallet balance: ${balance.totalBalance} 
+IOTA`);
+      }
+    } catch (error) {
+      console.error("❌ Error ensuring funds:", error);
+      throw error;
+    }
+  }
+  async getBalance(): Promise<string> {
+    const balance = await this.iotaClient.getBalance({
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      11/52
+----------------Page (10) Break----------------
+See full example on GitHub
+Outcome:
+Secure private key management with multiple format support
+Automatic wallet generation with clear security instructions
+Testnet faucet integration for development
+IOTA client initialization for blockchain connectivity
+Balance monitoring and fund management
+Notarization Service - Core Business
+Logic
+Notarization Client Initialization
+What We're Building: Connection to IOTA Notarization smart contract.
+Why We Need This:
+We need to initialize clients to interact with our deployed notarization package
+Both read-only and writable clients are required for different operations
+Package ID from environment variables connects us to our specific contract
+Postman collection for testing the API endpoints
+      owner: this.getAddress(),
+    });
+    return balance.totalBalance;
+  }
+  getPrivateKeyBase64(): string {
+    try {
+      const { secretKey } = 
+decodeIotaPrivateKey(this.keypair.getSecretKey());
+      return Buffer.from(secretKey).toString('base64');
+    } catch (error) {
+      console.error("Failed to convert private key to base64:", 
+error);
+      throw error;
+    }
+  }
+  getPrivateKeyBech32(): string {
+    return this.keypair.getSecretKey();
+  }
+}
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      12/52
+----------------Page (11) Break----------------
+Testing Health Check Endpoint
+A successful service health-check call that verifies the notarization service is
+running correctly, displaying API status, backend connectivity, and confirmation
+that all network components are operational.
+Implementation- Add to src/services/notarizationService.ts:
+workshop-module-12/iota-notarization-
+backend/src/services/notarizationService.ts
+import { NotarizationClient, NotarizationClientReadOnly, TimeLock, 
+State } from "@iota/notarization/node";
+import { WalletService } from "./walletService";
+export class NotarizationService {
+  private walletService: WalletService;
+  private notarizationClient: NotarizationClient | null = null;
+  private notarizationReadOnly: NotarizationClientReadOnly | null = 
+null;
+  constructor() {
+    this.walletService = new WalletService();
+  }
+  private async initializeClients(): Promise<void> {
+    if (this.notarizationClient) return;
+    const packageId = process.env.IOTA_NOTARIZATION_PKG_ID;
+    if (!packageId) {
+      throw new Error("IOTA_NOTARIZATION_PKG_ID environment variable 
+is required");
+    }
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      13/52
+----------------Page (12) Break----------------
+See full example on GitHub
+Outcome:
+Connection to deployed notarization smart contract
+Both read and write clients initialized
+Lazy initialization to optimize performance
+Proper error handling for missing configurations
+Dynamic Notarization Creation
+    console.log(" Initializing notarization clients...");
+    const iotaClient = this.walletService.getIotaClient();
+    
+    this.notarizationReadOnly = await 
+NotarizationClientReadOnly.createWithPkgId(
+      iotaClient,
+      packageId
+    );
+    const signer = this.walletService.getSigner();
+    this.notarizationClient = await NotarizationClient.create(
+      this.notarizationReadOnly,
+      signer
+    );
+    console.log("✅ Notarization clients initialized successfully");
+  }
+  private async getClient(): Promise<NotarizationClient> {
+    if (!this.notarizationClient) {
+      await this.initializeClients();
+    }
+    if (!this.notarizationClient) {
+      throw new Error("Notarization client not initialized");
+    }
+    return this.notarizationClient;
+  }
+  private getReadOnly(): NotarizationClientReadOnly {
+    if (!this.notarizationClient) {
+      throw new Error("Notarization client not initialized");
+    }
+    return this.notarizationClient.readOnly();
+  }
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      14/52
+----------------Page (13) Break----------------
+What We're Building: Mutable notarizations that can be updated and transferred.
+Why We Need This:
+Many documents evolve over time (contracts, compliance records, project
+docs)
+Users need to update content while maintaining audit trail
+Transfer capabilities allow ownership changes
+Time-based locks provide security controls
+Postman collection for testing the API endpoints
+Testing Dynamic Notarization Creation Endpoint
+Creating a dynamic notarization with a transfer lock set to unlock at a future
+timestamp — demonstrating how time-based restrictions can be applied to
+prevent unauthorized transfers until the specified date.
+Example of creating a dynamic notarization without any transfer or time locks —
+illustrating a fully flexible notarization that can later be updated or transferred by
+the owner without restriction.
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      15/52
+----------------Page (14) Break----------------
+Implementation- Add to src/services/notarizationService.ts:
+workshop-module-12/iota-notarization-
+backend/src/services/notarizationService.ts
+// Create Dynamic Notarization
+async createDynamicNotarization(
+  content: string,
+  metadata: string,
+  description?: string,
+  transferLock?: { unlockAt?: number; untilDestroyed?: boolean }
+): Promise<any> {
+  const client = await this.getClient();
+  let builder = client.createDynamic().withStringState(content, 
+metadata);
+  if (description) {
+    builder = builder.withImmutableDescription(description);
+  }
+  if (transferLock?.unlockAt) {
+    builder = 
+builder.withTransferLock(TimeLock.withUnlockAt(transferLock.unlockAt));
+  } else if (transferLock?.untilDestroyed) {
+    builder = builder.withTransferLock(TimeLock.withUntilDestroyed());
+  }
+  const result = await builder.finish().buildAndExecute(client);
+  return {
+    notarizationId: result.output.id,
+    transactionDigest: result.response.digest,
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      16/52
+----------------Page (15) Break----------------
+See full example on GitHub
+Outcome:
+Mutable notarizations for evolving documents
+Optional transfer locks for security
+Immutable descriptions for permanent context
+Blockchain transaction with proof of creation
+Locked Notarization Creation
+What We're Building: Immutable notarizations for permanent records.
+Why We Need This:
+Legal documents, certificates, and final records should never change
+Provides cryptographic proof of existence at a specific time
+Delete locks prevent accidental or malicious destruction
+Perfect for regulatory compliance and audit trails
+Postman collection for testing the API endpoints
+Testing Locked Notarization Creation Endpoint
+Successful creation of a locked notarization with a delete lock set far in the future
+— ensuring the document remains permanently preserved on the blockchain until
+the unlock timestamp.                                                     
+    type: "dynamic",
+    timestamp: new Date()
+  };
+}
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      17/52
+----------------Page (16) Break----------------
+Error response when attempting to create a locked notarization with an invalid
+timestamp — demonstrating the system's validation that prevents setting delete
+locks in the past.
+Implementation- Add to src/services/notarizationService.ts:
+workshop-module-12/iota-notarization-
+backend/src/services/notarizationService.ts
+  // Create Locked Notarization
+async createLockedNotarization(
+  content: string,
+  metadata: string,
+  description?: string,
+  deleteLock?: { unlockAt?: number}
+): Promise<any> {
+  const client = await this.getClient();
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      18/52
+----------------Page (17) Break----------------
+See full example on GitHub
+Outcome:
+Immutable records for permanent audit trails
+Time-based delete locks for document protection
+Cryptographic proof of document existence
+Regulatory compliance ready
+State and Metadata Updates
+ 
+  let builder = client.createLocked().withStringState(content, 
+metadata);
+  if (description) {
+    builder = builder.withImmutableDescription(description);
+  }
+  if (deleteLock?.unlockAt) {
+    const currentTime = Math.floor(Date.now() / 1000);
+    
+    if (deleteLock.unlockAt <= currentTime) {
+      throw new Error("unlockAt timestamp must be in the future");
+    }
+    
+    console.log(` Setting delete lock: UnlockAt ${new 
+Date(deleteLock.unlockAt * 1000).toISOString()}`);
+    builder = 
+builder.withDeleteLock(TimeLock.withUnlockAt(deleteLock.unlockAt));
+  } else {
+    // No delete lock means the notarization can be destroyed 
+immediately
+    console.log(" Setting delete lock: None (can destroy 
+immediately)");
+    builder = builder.withDeleteLock(TimeLock.withNone());
+  }
+  const result = await builder.finish().buildAndExecute(client);
+  return {
+    notarizationId: result.output.id,
+    transactionDigest: result.response.digest,
+    type: "locked",
+    timestamp: new Date()
+  };
+}
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      19/52
+----------------Page (18) Break----------------
+What We're Building: Update capabilities for dynamic notarizations.
+Why We Need This:
+Documents evolve - contracts get amended, records get updated
+Version tracking provides audit trail of changes
+Separate metadata updates don't affect content versioning
+Only dynamic notarizations should be updatable
+Postman collection for testing the API endpoints
+Testing State and Metadata Update Endpoint
+Updating the content hash and metadata of a dynamic notarization — showing
+how document versions evolve while maintaining a complete audit trail of changes
+on the blockchain.
+Modifying only the metadata of a dynamic notarization without changing the
+content hash — demonstrating how administrative information can be updated
+independently from the core document content.
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      20/52
+----------------Page (19) Break----------------
+Implementation- Add to src/services/notarizationService.ts:
+workshop-module-12/iota-notarization-
+backend/src/services/notarizationService.ts
+// Update State - Add locked notarization check
+async updateState(notarizationId: string, content: string, metadata: 
+string): Promise<any> {
+  const client = await this.getClient();
+  
+  // Check if notarization is locked before attempting update
+  const details = await this.getNotarizationDetails(notarizationId);
+  if (details.method === "Locked") {
+    throw new Error("Cannot update state of a locked notarization - it 
+is immutable");
+  }
+  const state = State.fromString(content, metadata);
+  const result = await client
+    .updateState(state, notarizationId)
+    .buildAndExecute(client);
+  return {
+    transactionDigest: result.response.digest,
+    timestamp: new Date()
+  };
+}
+// Update Metadata - Add locked notarization check
+async updateMetadata(notarizationId: string, metadata: string | 
+undefined): Promise<any> {
+  const client = await this.getClient();
+  
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      21/52
+----------------Page (20) Break----------------
+See full example on GitHub
+Outcome:
+Version tracking for document evolution
+Separate content and metadata update paths
+Immutability protection for locked notarizations
+Complete audit trail of changes
+Notarization Ownership Transfer
+What We're Building: Transfer dynamic notarizations between wallets.
+Why We're Building This:
+Document ownership may need to change hands
+Business processes often involve transferring responsibilities
+Only dynamic notarizations should be transferable
+Transfer locks can prevent unauthorized transfers
+Postman collection for testing the API endpoints
+Testing Notarization Ownership Transfer Endpoint
+Successful transfer of a dynamic notarization to another wallet address —
+confirming that ownership changes are properly recorded on the blockchain with
+transaction verification.
+  // Check if notarization is locked before attempting update
+  const details = await this.getNotarizationDetails(notarizationId);
+  if (details.method === "Locked") {
+    throw new Error("Cannot update metadata of a locked notarization - 
+it is immutable");
+  }
+  const result = await client
+    .updateMetadata(metadata, notarizationId)
+    .buildAndExecute(client);
+  return {
+    transactionDigest: result.response.digest,
+    timestamp: new Date()
+  };
+}
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      22/52
+----------------Page (21) Break----------------
+Failed transfer attempt due to an active time lock — demonstrating how transfer
+restrictions protect documents from being moved before the specified unlock
+time.
+Error when attempting to transfer a locked notarization — showing the system's
+protection against transferring immutable records that are designed to be
+permanently owned.
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      23/52
+----------------Page (22) Break----------------
+Implementation- Add to src/services/notarizationService.ts:
+workshop-module-12/iota-notarization-
+backend/src/services/notarizationService.ts
+See full example on GitHub
+Outcome:
+Secure ownership transfer for dynamic notarizations
+Protection against transferring locked notarizations
+Blockchain-verified ownership changes
+Support for business process workflows
+// Transfer Notarization - Add locked notarization check
+async transferNotarization(notarizationId: string, recipientAddress: 
+string): Promise<any> {
+  const client = await this.getClient();
+  
+  // Check if notarization is locked before attempting transfer
+  const details = await this.getNotarizationDetails(notarizationId);
+  if (details.method === "Locked") {
+    throw new Error("Cannot transfer a locked notarization - it is 
+non-transferable");
+  }
+  const result = await client
+    .transferNotarization(notarizationId, recipientAddress)
+    .buildAndExecute(client);
+  return {
+    transactionDigest: result.response.digest,
+    timestamp: new Date()
+  };
+}
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      24/52
+----------------Page (23) Break----------------
+Notarization Destruction
+What We're Building: Safe deletion of notarizations with lock checks.
+Why We Need This:
+Storage cleanup when documents are no longer needed
+Delete locks prevent premature destruction
+Recovery of blockchain storage deposits
+Compliance with data retention policies
+Postman collection for testing the API endpoints
+Testing Notarization Destruction Endpoint
+Successful deletion of a notarization that has no active locks — demonstrating
+proper cleanup and storage recovery when documents are no longer required.
+Failed deletion attempt because the notarization has already been transferred to
+another owner — showing the system's protection against unauthorized
+destruction by non-owners.
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      25/52
+----------------Page (24) Break----------------
+Error when attempting to delete a locked notarization with an active delete lock —
+illustrating how time-based protection prevents premature document destruction.
+Implementation- Add to src/services/notarizationService.ts:
+workshop-module-12/iota-notarization-
+backend/src/services/notarizationService.ts
+// Check if destruction is allowed before attempting to destroy
+async canDestroyNotarization(notarizationId: string): Promise<boolean> 
+{
+  const readOnly = this.getReadOnly();
+  return await readOnly.isDestroyAllowed(notarizationId);
+}
+// Destroy Notarization - Add pre-check
+async destroyNotarization(notarizationId: string): Promise<any> {
+  const client = await this.getClient();
+  
+  // Optional: Check if destruction is allowed first
+  const canDestroy = await 
+this.canDestroyNotarization(notarizationId);
+  if (!canDestroy) {
+    throw new Error("Cannot destroy notarization - it may be locked or 
+have active delete locks");
+  }
+  const result = await client
+    .destroy(notarizationId)
+    .buildAndExecute(client);
+  return {
+    transactionDigest: result.response.digest,
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      26/52
+----------------Page (25) Break----------------
+See full example on GitHub
+Outcome:
+Safe deletion with lock validation
+Protection against accidental data loss
+Storage deposit recovery
+Compliance with retention policies
+Query and Verification
+What We're Building: Read operations and integrity verification.
+Why We Need This:
+Users need to retrieve notarization details
+Integrity verification proves documents haven't been altered
+Version history provides audit trails
+Lock status informs users about available actions
+Postman collection for testing the API endpoints
+Testing Notarization Query and Verification Endpoint
+Notarization Details Retrieval
+Retrieving complete details of a dynamic notarization — showing version history,
+current content hash, metadata, and lock status information for comprehensive
+document auditing.
+    timestamp: new Date()
+  };
+}
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      27/52
+----------------Page (26) Break----------------
+Viewing details of a locked notarization — displaying immutable properties,
+creation timestamp, and permanent lock status that distinguishes it from dynamic
+records.
+Cryptographic Integrity Verification
+Successful verification confirming that a document's current hash matches the
+expected value — providing cryptographic proof that the document hasn't been
+tampered with since notarization.
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      28/52
+----------------Page (27) Break----------------
+Failed verification showing hash mismatch — alerting users when a document's
+content doesn't match the blockchain record, indicating potential tampering or
+version issues.
+Implementation- Add to src/services/notarizationService.ts:
+workshop-module-12/iota-notarization-
+backend/src/services/notarizationService.ts
+// Get Notarization Details
+async getNotarizationDetails(notarizationId: string): Promise<any> {
+  const readOnly = this.getReadOnly();
+  const [
+    state,
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      29/52
+----------------Page (28) Break----------------
+    versionCount,
+    description,
+    metadata,
+    createdAt,
+    method,
+    isTransferLocked,
+    isUpdateLocked,
+    isDestroyAllowed
+  ] = await Promise.all([
+    readOnly.state(notarizationId),
+    readOnly.stateVersionCount(notarizationId),
+    readOnly.description(notarizationId),
+    readOnly.updatableMetadata(notarizationId),
+    readOnly.createdAtTs(notarizationId),
+    readOnly.notarizationMethod(notarizationId),
+    readOnly.isTransferLocked(notarizationId),
+    readOnly.isUpdateLocked(notarizationId),
+    readOnly.isDestroyAllowed(notarizationId)
+  ]);
+  return {
+    notarizationId,
+    state: {
+      content: state.data.toString(),
+      metadata: state.metadata
+    },
+    versionCount: Number(versionCount),
+    description,
+    metadata,
+    createdAt: new Date(Number(createdAt) * 1000).toISOString(),
+    method,
+    locks: {
+      transferLocked: isTransferLocked,
+      updateLocked: isUpdateLocked,
+      destroyAllowed: isDestroyAllowed
+    }
+  };
+}
+// Verify Notarization
+async verifyNotarization(notarizationId: string, expectedContent: 
+string): Promise<any> {
+  const readOnly = this.getReadOnly();
+  
+  try {
+    const state = await readOnly.state(notarizationId);
+    const actualContent = state.data.toString();
+    
+    return {
+      verified: actualContent === expectedContent,
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      30/52
+----------------Page (29) Break----------------
+See full example on GitHub
+Outcome:
+Complete notarization information retrieval
+Cryptographic integrity verification
+Version history and audit trail access
+Lock status monitoring for user guidance
+System Health and Wallet Info
+What We're Building: System monitoring and wallet information endpoints.
+Why We Need This:
+Monitoring service health and connectivity
+Wallet balance and address information
+Network configuration verification
+Debugging and operational support
+Postman collection for testing the API endpoints
+Testing Wallet Info Endpoint
+Wallet information endpoint displaying the connected IOTA address, current
+balance, and network status — essential for operational monitoring and
+debugging blockchain connectivity.
+      notarizationId,
+      expectedContent,
+      actualContent,
+      match: actualContent === expectedContent
+    };
+  } catch (error) {
+    return {
+      verified: false,
+      notarizationId,
+      error: "Notarization not found or inaccessible"
+    };
+  }
+}
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      31/52
+----------------Page (30) Break----------------
+Implementation- Add to src/services/notarizationService.ts:
+workshop-module-12/iota-notarization-
+backend/src/services/notarizationService.ts
+  // Get Wallet Info
+  async getWalletInfo(): Promise<any> {
+    const balance = await this.walletService.getBalance();
+    
+    return {
+      address: this.walletService.getAddress(),
+      balance,
+      network: "testnet",
+      hasPrivateKey: !!process.env.PRIVATE_KEY
+    };
+  }
+  // Health check
+  async healthCheck(): Promise<any> {
+    try {
+      const walletInfo = await this.getWalletInfo();
+      return {
+        success: true,
+        status: "healthy",
+        wallet: {
+          address: walletInfo.address,
+          balance: walletInfo.balance,
+          hasPrivateKey: walletInfo.hasPrivateKey
+        },
+        network: "testnet",
+        packageId: process.env.IOTA_NOTARIZATION_PKG_ID,
+        timestamp: new Date().toISOString()
+      };
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      32/52
+----------------Page (31) Break----------------
+See full example on GitHub
+Outcome:
+System health monitoring
+Wallet information and balance tracking
+Network connectivity verification
+Operational debugging support
+Controllers
+API Controllers - HTTP Interface Layer
+File Hash Generation Endpoint
+What We're Building: REST API endpoint for file hashing.
+Why We Need This:
+Users need to generate hashes before notarization
+File upload support for easy document processing
+Hash validation before blockchain operations
+User-friendly interface for document preparation
+Implementation- Create src/controllers/notarizationController.ts:
+workshop-module-12/iota-notarization-
+backend/src/controllers/notarizationController.ts
+    } catch (error) {
+      return {
+        success: false,
+        status: "unhealthy",
+        error: error instanceof Error ? error.message : "Unknown 
+error",
+        timestamp: new Date().toISOString()
+      };
+    }
+  }
+}
+import { Request, Response } from "express";
+import { NotarizationService } from "../services/notarizationService";
+import { CryptoUtils } from "../utils/crypto";
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      33/52
+----------------Page (32) Break----------------
+See full example on GitHub
+Outcome:
+File upload and hash generation
+User-friendly document preparation
+Hash validation before blockchain operations
+Error handling for file processing
+Dynamic Notarization Creation Endpoint
+What We're Building: API endpoint for creating mutable notarizations.
+Why We Need This:
+REST interface for dynamic notarization creation
+Input validation for required fields
+Transfer lock configuration support
+const notarizationService = new NotarizationService();
+export class NotarizationController {
+  // Compute hash for uploaded file
+  async createFileHash(req: Request, res: Response) {
+    try {
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          error: "file is required (as multipart/form-data)",
+        });
+      }
+      const fileBuffer = req.file.buffer;
+      const hash = CryptoUtils.computeFileHash(fileBuffer);
+      res.json({
+        success: true,
+        hash,
+        algorithm: "sha256",
+      });
+    } catch (error: any) {
+      console.error("File hash error:", error);
+      res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    }
+  }
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      34/52
+----------------Page (33) Break----------------
+User feedback with transaction details
+Implementation- Add to src/controllers/notarizationController.ts:
+workshop-module-12/iota-notarization-
+backend/src/controllers/notarizationController.ts
+// Create Dynamic Notarization
+async createDynamic(req: Request, res: Response) {
+  try {
+    const { content, metadata, description, transferLock } = req.body;
+    if (!content) {
+      return res.status(400).json({
+        success: false,
+        error: "content is required",
+      });
+    }
+    // Validate content is a valid SHA-256 hash
+    if (!CryptoUtils.isValidSHA256Hash(content)) {
+      return res.status(400).json({
+        success: false,
+        error: "content must be a valid SHA-256 hash (64 hex 
+characters)",
+      });
+    }
+    const result = await 
+notarizationService.createDynamicNotarization(
+      content,
+      metadata || "",
+      description,
+      transferLock
+    );
+    res.json({
+      success: true,
+      ...result,
+    });
+  } catch (error: any) {
+    console.error("Create dynamic error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+}
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      35/52
+----------------Page (34) Break----------------
+See full example on GitHub
+Outcome:
+REST API for dynamic notarization creation
+Input validation and error handling
+Transfer lock configuration support
+Transaction confirmation with IDs
+Locked Notarization Creation Endpoint
+What We're Building: API endpoint for creating immutable notarizations.
+Why We Need This:
+REST interface for permanent record creation
+Delete lock configuration for document protection
+Input validation for hash formats
+Immutable description support
+Implementation- Add to src/controllers/notarizationController.ts:
+workshop-module-12/iota-notarization-
+backend/src/controllers/notarizationController.ts
+// Create Locked Notarization
+async createLocked(req: Request, res: Response) {
+  try {
+    const { content, metadata, description, deleteLock } = req.body;
+    if (!content) {
+      return res.status(400).json({
+        success: false,
+        error: "content is required",
+      });
+    }
+    // Validate content is a valid SHA-256 hash
+    if (!CryptoUtils.isValidSHA256Hash(content)) {
+      return res.status(400).json({
+        success: false,
+        error: "content must be a valid SHA-256 hash (64 hex 
+characters)",
+      });
+    }
+    const result = await notarizationService.createLockedNotarization(
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      36/52
+----------------Page (35) Break----------------
+See full example on GitHub
+Outcome:
+REST API for immutable notarization creation
+Delete lock configuration for security
+Input validation for data integrity
+Permanent record creation with proof
+Update Operations Endpoints
+What We're Building: API endpoints for updating dynamic notarizations.
+Why We Need This:
+Separate endpoints for state and metadata updates
+Parameter validation for notarization IDs
+Hash format validation for content updates
+Error handling for locked notarizations
+Implementation- Add to src/controllers/notarizationController.ts:
+workshop-module-12/iota-notarization-
+backend/src/controllers/notarizationController.ts
+      content,
+      metadata || "",
+      description,
+      deleteLock
+    );
+    res.json({
+      success: true,
+      ...result,
+    });
+  } catch (error: any) {
+    console.error("Create locked error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+}
+// Update State
+async updateState(req: Request, res: Response) {
+  try {
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      37/52
+----------------Page (36) Break----------------
+    const { notarizationId } = req.params;
+    const { content, metadata } = req.body;
+    if (!notarizationId || !content) {
+      return res.status(400).json({
+        success: false,
+        error: "notarizationId and content are required",
+      });
+    }
+    // Validate content is a valid SHA-256 hash
+    if (!CryptoUtils.isValidSHA256Hash(content)) {
+      return res.status(400).json({
+        success: false,
+        error: "content must be a valid SHA-256 hash (64 hex 
+characters)",
+      });
+    }
+    const result = await notarizationService.updateState(
+      notarizationId,
+      content,
+      metadata || ""
+    );
+    res.json({
+      success: true,
+      notarizationId,
+      ...result,
+    });
+  } catch (error: any) {
+    console.error("Update state error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+}
+// Update Metadata
+async updateMetadata(req: Request, res: Response) {
+  try {
+    const { notarizationId } = req.params;
+    const { metadata } = req.body;
+    if (!notarizationId) {
+      return res.status(400).json({
+        success: false,
+        error: "notarizationId is required",
+      });
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      38/52
+----------------Page (37) Break----------------
+See full example on GitHub
+Outcome:
+Separate update endpoints for flexibility
+Parameter validation and error handling
+Content hash validation
+Protection against updating locked notarizations
+Transfer and Destruction Endpoints
+What We're Building: API endpoints for ownership transfer and deletion.
+Why We Need This:
+Ownership transfer for business processes
+Safe deletion with validation
+Recipient address validation
+Protection against unauthorized operations
+Implementation- Add to src/controllers/notarizationController.ts:
+workshop-module-12/iota-notarization-
+backend/src/controllers/notarizationController.ts
+    }
+    const result = await notarizationService.updateMetadata(
+      notarizationId,
+      metadata
+    );
+    res.json({
+      success: true,
+      notarizationId,
+      ...result,
+    });
+  } catch (error: any) {
+    console.error("Update metadata error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+}
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      39/52
+----------------Page (38) Break----------------
+// Transfer Notarization
+async transferNotarization(req: Request, res: Response) {
+  try {
+    const { notarizationId } = req.params;
+    const { recipientAddress } = req.body;
+    if (!notarizationId || !recipientAddress) {
+      return res.status(400).json({
+        success: false,
+        error: "notarizationId and recipientAddress are required",
+      });
+    }
+    const result = await notarizationService.transferNotarization(
+      notarizationId,
+      recipientAddress
+    );
+    res.json({
+      success: true,
+      notarizationId,
+      recipientAddress,
+      ...result,
+    });
+  } catch (error: any) {
+    console.error("Transfer error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+}
+// Destroy Notarization
+async destroyNotarization(req: Request, res: Response) {
+  try {
+    const { notarizationId } = req.params;
+    if (!notarizationId) {
+      return res.status(400).json({
+        success: false,
+        error: "notarizationId is required",
+      });
+    }
+    const result = await notarizationService.destroyNotarization(
+      notarizationId
+    );
+    res.json({
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      40/52
+----------------Page (39) Break----------------
+See full example on GitHub
+Outcome:
+Secure ownership transfer operations
+Safe deletion with validation checks
+Parameter validation for all operations
+Protection against invalid operations
+Query and Verification Endpoints
+What We're Building: API endpoints for reading and verifying notarizations.
+Why We Need This:
+Retrieve notarization details for users
+Cryptographic verification of document integrity
+Version history and lock status information
+User-friendly data presentation
+Implementation- Add to src/controllers/notarizationController.ts:
+workshop-module-12/iota-notarization-
+backend/src/controllers/notarizationController.ts
+      success: true,
+      notarizationId,
+      ...result,
+    });
+  } catch (error: any) {
+    console.error("Destroy error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+}
+// Get Notarization Details
+async getDetails(req: Request, res: Response) {
+  try {
+    const { notarizationId } = req.params;
+    if (!notarizationId) {
+      return res.status(400).json({
+        success: false,
+        error: "notarizationId is required",
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      41/52
+----------------Page (40) Break----------------
+      });
+    }
+    const details = await notarizationService.getNotarizationDetails(
+      notarizationId
+    );
+    res.json({
+      success: true,
+      ...details,
+    });
+  } catch (error: any) {
+    console.error("Get details error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+}
+// Verify Notarization
+async verify(req: Request, res: Response) {
+  try {
+    const { notarizationId, expectedContent } = req.body;
+    if (!notarizationId || !expectedContent) {
+      return res.status(400).json({
+        success: false,
+        error: "notarizationId and expectedContent are required",
+      });
+    }
+    // Validate expectedContent is a valid SHA-256 hash
+    if (!CryptoUtils.isValidSHA256Hash(expectedContent)) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "expectedContent must be a valid SHA-256 hash (64 hex 
+characters)",
+      });
+    }
+    const result = await notarizationService.verifyNotarization(
+      notarizationId,
+      expectedContent
+    );
+    res.json({
+      success: true,
+      ...result,
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      42/52
+----------------Page (41) Break----------------
+See full example on GitHub
+Outcome:
+Complete notarization information retrieval
+Cryptographic integrity verification
+User-friendly data presentation
+Error handling for missing notarizations
+System Endpoints
+What We're Building: Health check and wallet information endpoints.
+Why We Need This:
+Service health monitoring
+Wallet information for debugging
+Network connectivity verification
+Operational support endpoints
+Implementation- Add to src/controllers/notarizationController.ts:
+workshop-module-12/iota-notarization-
+backend/src/controllers/notarizationController.ts
+    });
+  } catch (error: any) {
+    console.error("Verify error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+}
+  // Get Wallet Info
+  async getWalletInfo(req: Request, res: Response) {
+    try {
+      const walletInfo = await notarizationService.getWalletInfo();
+      res.json({
+        success: true,
+        ...walletInfo,
+      });
+    } catch (error: any) {
+      console.error("Wallet info error:", error);
+      res.status(500).json({
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      43/52
+----------------Page (42) Break----------------
+See full example on GitHub
+Outcome:
+Service health monitoring endpoint
+Wallet information for operational support
+Network connectivity verification
+Debugging and maintenance support
+Routes
+API Routes Configuration
+What We're Building: Express router configuration for all endpoints.
+        success: false,
+        error: error.message,
+      });
+    }
+  }
+  // Health Check - UPDATED METHOD
+  async healthCheck(req: Request, res: Response) {
+    try {
+      const health = await notarizationService.healthCheck();
+      if (health.success) {
+        res.json({
+          success: true,
+          message: "IOTA Notarization Backend is healthy",
+          timestamp: health.timestamp,
+          network: "testnet",
+          packageId: process.env.IOTA_NOTARIZATION_PKG_ID,
+          wallet: health.wallet,
+        });
+      } else {
+        res.status(500).json(health);
+      }
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        error: `Health check failed: ${error.message}`,
+      });
+    }
+  }
+}
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      44/52
+----------------Page (43) Break----------------
+Why We Need This:
+Organized route structure
+Proper middleware configuration
+File upload handling
+Route ordering to prevent conflicts
+Implementation- Create src/routes/notarizationRoutes.ts:
+workshop-module-12/iota-notarization-
+backend/src/routes/notarizationRoutes.ts
+import { Router } from "express";
+import { NotarizationController } from 
+"../controllers/notarizationController";
+import multer from "multer";
+const upload = multer({ limits: { fileSize: 10 * 1024 * 1024 } }); // 
+10 MB limit
+const router = Router();
+const controller = new NotarizationController();
+// System Operations - SPECIFIC ROUTES FIRST
+router.get("/health", controller.healthCheck.bind(controller));
+router.get("/wallet/info", controller.getWalletInfo.bind(controller));
+// Notarization Operations
+router.post("/hash", upload.single("file"), 
+controller.createFileHash.bind(controller));
+router.post("/dynamic", controller.createDynamic.bind(controller));
+router.post("/locked", controller.createLocked.bind(controller));
+router.put("/:notarizationId/state", 
+controller.updateState.bind(controller));
+router.put("/:notarizationId/metadata", 
+controller.updateMetadata.bind(controller));
+router.post("/:notarizationId/transfer", 
+controller.transferNotarization.bind(controller));
+router.delete("/:notarizationId", 
+controller.destroyNotarization.bind(controller));
+// Query Operations - PARAMETERIZED ROUTES LAST
+router.get("/:notarizationId", 
+controller.getDetails.bind(controller));
+router.post("/verify", controller.verify.bind(controller));
+export default router;
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      45/52
+----------------Page (44) Break----------------
+See full example on GitHub
+Outcome:
+Organized REST API structure
+File upload middleware configuration
+Proper route ordering to prevent conflicts
+Complete endpoint coverage
+Server Setup
+What We're Building: Express server configuration and startup.
+Why We Need This:
+Server initialization and configuration
+Middleware setup (CORS, JSON parsing)
+Route registration
+Error handling and 404 responses
+Startup logging and documentation
+Implementation- Create src/server.ts:
+workshop-module-12/iota-notarization-backend/src/server.ts
+import dotenv from "dotenv";
+dotenv.config();
+import express from "express";
+import cors from "cors";
+import notarizationRoutes from "./routes/notarizationRoutes";
+const app = express();
+const PORT = process.env.PORT || 3001;
+app.use(cors());
+app.use(express.json({ limit: "10mb" }));
+// Routes
+app.use("/api/notarizations", notarizationRoutes);
+// Root endpoint
+app.get("/", (req, res) => {
+  res.json({
+    message: "IOTA Notarization Backend API",
+    version: "1.0.0",
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      46/52
+----------------Page (45) Break----------------
+    timestamp: new Date().toISOString(),
+    endpoints: {
+      health: "GET /api/notarizations/health",
+      walletInfo: "GET /api/notarizations/wallet/info",
+      createHash: "POST /api/notarizations/hash (multipart/form-data, 
+field: file)", 
+      createDynamic: "POST /api/notarizations/dynamic",
+      createLocked: "POST /api/notarizations/locked",
+      updateState: "PUT /api/notarizations/:id/state",
+      updateMetadata: "PUT /api/notarizations/:id/metadata",
+      transfer: "POST /api/notarizations/:id/transfer",
+      destroy: "DELETE /api/notarizations/:id",
+      getDetails: "GET /api/notarizations/:id",
+      verify: "POST /api/notarizations/verify",
+    },
+    documentation: "Use Postman to test all endpoints",
+  });
+});
+// Error handling middleware
+app.use((error: any, req: any, res: any, next: any) => {
+  console.error("Unhandled error:", error);
+  res.status(500).json({
+    success: false,
+    error: "Internal server error",
+    message: error.message,
+  });
+});
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    error: "Endpoint not found",
+    availableEndpoints: [
+      "GET /",
+      "GET /api/notarizations/health",
+      "POST /api/notarizations/dynamic",
+      "POST /api/notarizations/locked",
+      "GET /api/notarizations/:id",
+      "POST /api/notarizations/verify",
+    ],
+  });
+});
+app.listen(PORT, () => {
+  console.log(` IOTA Notarization Backend running on port ${PORT}`);
+  console.log(` Connected to network: testnet`);
+  console.log(` Package ID: 
+${process.env.IOTA_NOTARIZATION_PKG_ID}`);
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      47/52
+----------------Page (46) Break----------------
+See full example on GitHub
+Outcome:
+Complete Express server setup
+CORS and JSON middleware configuration
+Comprehensive error handling
+API documentation at root endpoint
+Clear startup logging
+Complete Summary/Conclusion
+Complete code for reference
+Github
+Complete API and Readme Documentation
+Api-docs.md
+Readme.md
+Sequence Diagram
+The sequence diagram shows the flow of the Notarization System. Users upload
+files via the API, which the controller hashes using the Crypto Utility and returns to
+the user. For creating notarizations, the controller passes the request to the
+service, which gets the signer from the wallet, submits the notarization to the
+IOTA Blockchain, and returns the notarization ID and transaction details. Post-
+creation actions—verify, update, transfer, or destroy—follow a similar flow: the
+service signs and executes the transaction on-chain and returns the result. This
+ensures secure file hashing, transaction signing, blockchain recording, and
+flexible notarization management with full cryptographic integrity.
+  console.log(` API Base: 
+http://localhost:${PORT}/api/notarizations`);
+  console.log(
+    ` Health check: 
+http://localhost:${PORT}/api/notarizations/health`
+  );
+  console.log(` API Documentation: http://localhost:${PORT}/`);
+});
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      48/52
+----------------Page (47) Break----------------
+Cr yp to UtilityIOTA BlockchainWallet Se rviceNotarization Se rviceNotarization Co ntrollerExpress RoutesUser / Client
+Cr yp to UtilityIOTA BlockchainWallet Se rviceNotarization Se rviceNotarization Co ntrollerExpress RoutesUser / Client
+Upload file → request hash
+1
+handle hash request
+2
+comp uteSHA 256(file)
+3
+return fileHa sh
+4
+send hash result
+5
+Cr eate notarization
+6
+createNotarization()
+7
+process notarization
+8
+sign transaction
+9
+send transaction
+10
+confirm
+11
+notarization created
+12
+return details
+13
+Verify notarization
+14
+verify()
+15
+read from  chain
+16
+verification result
+17
+return result
+18
+Update / Transfer / Destroy
+19
+handle operation
+20
+perform  action
+21
+sign transaction
+22
+execute on-chain
+23
+confirma tion
+24
+result
+25
+return outcome
+26
+Complete System Overview
+What We've Built: A complete IOTA Notarization backend service with:
+Core Features:
+Dynamic Notarizations - Mutable records for evolving documents
+Locked Notarizations - Immutable records for permanent audit trails
+Transfer Controls - Ownership management with time-based locks
+Version Tracking - Complete audit trail of document changes
+Integrity Verification - Cryptographic proof of document authenticity
+API Endpoints:
+POST /hash - File hashing for document preparation
+POST /dynamic - Create mutable notarizations
+POST /locked - Create immutable notarizations
+PUT /:id/state - Update document content
+PUT /:id/metadata - Update document metadata
+POST /:id/transfer - Transfer ownership
+DELETE /:id - Destroy notarization
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      49/52
+----------------Page (48) Break----------------
+GET /:id - Retrieve notarization details
+POST /verify - Verify document integrity
+GET /health - System health check
+GET /wallet/info - Wallet information
+Security Features:
+SHA-256 cryptographic hashing
+Transfer and delete locks
+Immutability protection for locked records
+Input validation and error handling
+Private key security management
+Use Cases Supported:
+Legal Documents - Contracts, certificates, legal filings
+Compliance Records - Regulatory filings, audit trails
+Intellectual Property - Proof of creation and ownership
+Business Processes - Document workflows with version control
+Public Records - Transparent and verifiable public documents
+The system is now ready for testing and can be extended with frontend
+interfaces, additional security features, or integration with existing document
+management systems.
+Extension Tasks
+Build a Decentralized Document Verification & Audit
+Platform
+Take your notarization backend beyond basic proof-of-existence — turn it into a
+full-featured document verification and audit platform.
+Empower users, organizations, and institutions to notarize, manage, verify, and
+analyze digital records with cryptographic integrity on IOTA.
+Build These Advanced Features:
+Notarization Factory — allow users to create their own namespaces or
+notarization domains (e.g., “LegalDocs,” “ResearchProofs”) with unique
+access rules
+Batch Notarization — support bulk upload and notarization of multiple files
+with a single blockchain transaction
+Cross-Verification API — connect multiple Notarization backends for
+federated document verification across organizations
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      50/52
+----------------Page (49) Break----------------
+Timestamped Audit Dashboard — visualize document versions, updates, and
+transfers with a time-based activity timeline
+AI-Powered Document Classification — auto-detect document types
+(invoice, certificate, report) and tag metadata for enhanced search
+Technical Challenges:
+Smart contract factory design for multi-tenant notarization
+Efficient batching and hash aggregation (Merkle Tree notarization)
+Inter-service authentication between federated backends
+Real-time data sync using WebSockets or IOTA Streams
+Data privacy models for selective document disclosure
+This transforms your backend into a Proof-of-Integrity Platform, capable of
+serving enterprises, researchers, and public agencies — not just as a demo, but
+as a scalable production-ready architecture.
+Further Development Ideas
+Frontend dApp: Build a simple React-based dashboard (using IOTA dApp Kit)
+for file uploads, notarization management, and proof verification.
+TrueDoc Integrations: Connect the backend to TrueDoc for document
+visualization, metadata display, and on-chain audit report generation.
+Decentralized Identity (DID) Integration: Link notarizations to DID-based
+user identities to prove authorship and responsibility.
+Community Challenge
+Create your own Notarization Factory implementation and share it on the IOTA
+Builders Discord!
+Collaborate with others to design multi-domain notarization architectures,
+integrate AI-powered auditing tools, and showcase your innovation in community
+workshops.
+Give Feedback
+Previous
+« Minting and Managing Tokens
+Next
+IOTA Identity Workshop »
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      51/52
+----------------Page (50) Break----------------
+22/03/26, 18:04                   Workshop IOTA Notarization with TrueDoc | IOTA Documentation
+https://docs.iota.org/developer/workshops/iota-notarization-truedoc                                      52/52
+----------------Page (51) Break----------------

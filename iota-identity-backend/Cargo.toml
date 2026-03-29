@@ -1,9 +1,0 @@
-[package]
-name = "iota-identity-backend"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-anyhow = "1.0.102"
-iota-identity = "0.1.0"
-iota-sdk = "1.1.5"
