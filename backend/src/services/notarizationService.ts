@@ -24,7 +24,7 @@ export class NotarizationService {
       await new Promise(resolve => setTimeout(resolve, 3000)); // Simula latenza Blockchain
       const txDigest = "tx_sim_" + Date.now().toString(16) + CryptoUtils.computeSHA256(contentHash).substring(0, 16);
       return {
-        notarizationId: "iota_notar_" + contentHash.substring(0, 16),
+        notarizationId: "iota_notar_" + contentHash,
         transactionDigest: txDigest,
         type: "dynamic",
         timestamp: new Date()
@@ -44,10 +44,10 @@ export class NotarizationService {
   async verifyNotarization(notarizationId: string, expectedHash: string): Promise<any> {
     if (this.isSimulationMode) {
       await new Promise(resolve => setTimeout(resolve, 2000));
-      // In modalità simulazione, verifichiamo solo che l'ID generato corrisponda all'hash finto
-      const success = notarizationId.includes(expectedHash.substring(0, 16));
+      // In simulation mode, verify that the hash matches perfectly
+      const success = (notarizationId === "iota_notar_" + expectedHash);
       if (success) {
-         return { success: true, method: "Locked/Dynamic", message: "Il Documento non è stato manomesso sulla Blockchain Testnet." };
+         return { success: true, method: "Locked/Dynamic", message: "Document has not been tampered with on the Testnet Blockchain." };
       }
       throw new Error("Hash mismatch");
     }

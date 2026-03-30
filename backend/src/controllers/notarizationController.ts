@@ -31,14 +31,14 @@ export class NotarizationController {
     try {
       const { notarizationId, providedHash } = req.body;
       if (!notarizationId || !providedHash) {
-         return res.status(400).json({ error: "Manca notarizationId o Hash alfanumerico" });
+         return res.status(400).json({ error: "Missing notarizationId or alphanumeric Hash" });
       }
 
       const verified = await notarizationService.verifyNotarization(notarizationId, providedHash);
-      res.json({ success: true, message: verified.message || "Validazione TrueDoc immutabile garantita!" });
+      res.json({ success: true, message: verified.message || "Immutable TrueDoc validation guaranteed!" });
     } catch (error: any) {
       console.error(error);
-      res.status(400).json({ success: false, error: "Firma invalida o manomessa!" });
+      res.status(400).json({ success: false, error: "Invalid or tampered signature!" });
     }
   }
 }

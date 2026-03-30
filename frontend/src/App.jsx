@@ -18,6 +18,7 @@ import {
   Keyboard
 } from 'lucide-react';
 import './index.css';
+import logoImg from './assets/Logo_Secure_travel_id.png';
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -34,8 +35,8 @@ class ErrorBoundary extends React.Component {
     if (this.state.hasError) {
       return (
         <div style={{ padding: '2rem', background: 'white', color: 'red', borderRadius: '12px' }}>
-          <h2>Si è verificato un Errore di Rendering React!</h2>
-          <p><strong>Dettaglio:</strong> {this.state.error?.toString()}</p>
+          <h2>A React Rendering Error Occurred!</h2>
+          <p><strong>Details:</strong> {this.state.error?.toString()}</p>
           <pre style={{ fontSize: '10px', overflowX: 'auto' }}>{this.state.info?.componentStack}</pre>
         </div>
       );
@@ -202,11 +203,11 @@ function App() {
       if (response.ok && data.success) {
         setValidationResult({ success: true, msg: "Verified. Hash matches on-chain record." });
       } else {
-        setValidationResult({ success: false, msg: data.error || "Tampered or invalid document." });
+        setValidationResult({ success: false, msg: data.error || "Error: Document hash does not match any valid record on IOTA. The document may have been tampered with." });
       }
     } catch (err) {
       console.error(err);
-      setValidationResult({ success: false, msg: err.message });
+      setValidationResult({ success: false, msg: "Error: " + err.message + " (IOTA Verification Failed)" });
     } finally {
       setIsLoading(false);
     }
@@ -218,8 +219,8 @@ function App() {
       {/* Navbar matching screenshot */}
       <nav className="trustpass-navbar">
         <div className="nav-brand" onClick={handleBack}>
-          <div className="logo-icon">
-            <Shield size={20} color="var(--accent-blue)" />
+          <div className="logo-icon" style={{ background: 'transparent', border: 'none', padding: 0 }}>
+            <img src={logoImg} alt="Secure Travel ID" style={{ height: '32px', objectFit: 'contain' }} />
           </div>
           Secure Travel ID
         </div>
@@ -237,8 +238,8 @@ function App() {
         {view === 'home' && (
           <div className="home-layout">
             <div className="home-text-section">
-              <div className="fingerprint-icon">
-                <Fingerprint size={32} />
+              <div className="fingerprint-icon" style={{ background: 'transparent', border: 'none' }}>
+                <img src={logoImg} alt="Secure Travel ID Logo" style={{ width: '64px', height: '64px', objectFit: 'contain' }} />
               </div>
               <h1>Own your identity,<br/>notarize it on IOTA.</h1>
               <p>Protect your sensitive documents (ID/Passport) with verifiable cryptographic proofs on the IOTA Tangle.</p>
@@ -293,7 +294,7 @@ function App() {
             {isLoading && (
               <div className="client-loading-container">
                 <div className="scanning-icon-container">
-                  <Fingerprint size={80} color="var(--accent-blue)" className="base-fingerprint" />
+                  <img src={logoImg} alt="Scanning Logo" className="base-fingerprint" style={{ width: '80%', height: '80%', objectFit: 'contain' }} />
                   <div className="scanning-beam"></div>
                 </div>
                 <h3 className="loading-title">Scanning & Notarizing</h3>
