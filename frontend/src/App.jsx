@@ -1,15 +1,15 @@
 import React, { useState, useRef, useEffect } from 'react';
 import QRCode from 'qrcode';
 import { Html5Qrcode } from 'html5-qrcode';
-import { 
-  Shield, 
-  ArrowLeft, 
+import {
+  Shield,
+  ArrowLeft,
   HelpCircle,
   Fingerprint,
   Upload,
-  CheckCircle, 
+  CheckCircle,
   XCircle,
-  Loader2, 
+  Loader2,
   Copy,
   Focus,
   Lock,
@@ -64,6 +64,7 @@ function App() {
 
   // References
   const html5QrCodeRef = useRef(null);
+  const isScanningRef = useRef(false);
 
   const resetState = () => {
     setNotarizedToken('');
@@ -88,46 +89,81 @@ function App() {
   }, []);
 
   const startScanner = async () => {
-    if (!html5QrCodeRef.current) {
-      try {
-        html5QrCodeRef.current = new Html5Qrcode('reader-custom');
-      } catch (err) {
-        // usually DOM element not found, but we check below
-      }
+    // Check if DOM element exists
+    const readerElement = document.getElementById('reader-custom');
+    if (!readerElement) {
+      console.error('Reader element not found in DOM');
+      alert('Scanner UI not ready. Please try again.');
+      return;
     }
-    
+
+    // Clean up old instance first
     if (html5QrCodeRef.current) {
-      setIsScanning(true);
       try {
-        await html5QrCodeRef.current.start(
-          { facingMode: 'environment' },
-          { fps: 10, qrbox: { width: 250, height: 250 } },
-          (decodedText) => {
-            stopScanner();
-            setHostInput(decodedText);
-            handleHostVerifyLogic(decodedText);
-          },
-          () => {
-            // ignore constant background errors from seeking QR code
-          }
-        );
-      } catch (err) {
-        console.error('Camera start error', err);
-        setIsScanning(false);
-        alert('Could not start camera. Please check permissions.');
+        await html5QrCodeRef.current.stop();
+        html5QrCodeRef.current.clear();
+      } catch (e) {
+        console.error('Cleanup before start:', e);
       }
+      html5QrCodeRef.current = null;
+    }
+
+    try {
+      html5QrCodeRef.current = new Html5Qrcode('reader-custom');
+      isScanningRef.current = true;
+
+      await html5QrCodeRef.current.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 250, height: 250 } },
+        (decodedText) => {
+          // Prevent multiple triggers while stopping
+          if (!isScanningRef.current) return;
+          isScanningRef.current = false;
+
+          setHostInput(decodedText);
+          handleHostVerifyLogic(decodedText);
+          stopScanner();
+        },
+        () => {
+          // ignore constant background errors from seeking QR code
+        }
+      );
+      setIsScanning(true);
+    } catch (err) {
+      console.error('Camera start error:', err);
+      setIsScanning(false);
+      isScanningRef.current = false;
+      if (html5QrCodeRef.current) {
+        try {
+          html5QrCodeRef.current.clear();
+        } catch (e) { }
+        html5QrCodeRef.current = null;
+      }
+      alert('Could not start camera. Please check permissions.');
     }
   };
 
   const stopScanner = () => {
-    if (html5QrCodeRef.current && isScanning) {
-      html5QrCodeRef.current.stop().then(() => {
-        html5QrCodeRef.current.clear();
+    if (html5QrCodeRef.current) {
+      isScanningRef.current = false;
+      try {
+        html5QrCodeRef.current.stop().then(() => {
+          if (html5QrCodeRef.current) {
+            html5QrCodeRef.current.clear();
+            html5QrCodeRef.current = null;
+          }
+          setIsScanning(false);
+        }).catch((e) => {
+          console.error('Stop scanner error', e);
+          // Ensure cleanup on error
+          html5QrCodeRef.current = null;
+          setIsScanning(false);
+        });
+      } catch (e) {
+        console.error('Stop error:', e);
         html5QrCodeRef.current = null;
         setIsScanning(false);
-      }).catch((e) => {
-        console.error('Stop scanner error', e);
-      });
+      }
     }
   };
 
@@ -151,7 +187,7 @@ function App() {
       await new Promise(r => setTimeout(r, 800));
       setLoadingText('Notarizing on IOTA Tangle...');
 
-      const response = await fetch(`http://127.0.0.1:3001/notarize`, {
+      const response = await fetch(`/api/notarize`, {
         method: 'POST',
         body: formData,
       });
@@ -161,7 +197,7 @@ function App() {
       setLoadingText('Generating cryptographically secure QR code...');
       const combinedToken = `${data.notarizationId}::${data.fileHash}`;
       setNotarizedToken(combinedToken);
-      
+
       try {
         const url = await QRCode.toDataURL(combinedToken, { width: 200, margin: 2, color: { dark: '#000000', light: '#ffffff' } });
         setQrDataUrl(url);
@@ -174,7 +210,7 @@ function App() {
     } finally {
       setIsLoading(false);
       if (fileInputRef.current) {
-         try { fileInputRef.current.value = ''; } catch(e) {}
+        try { fileInputRef.current.value = ''; } catch (e) { }
       }
     }
   };
@@ -193,7 +229,7 @@ function App() {
       const parts = tokenString.split('::');
       if (parts.length !== 2) throw new Error("Invalid Secure Travel ID format");
 
-      const response = await fetch(`http://127.0.0.1:3001/verify`, {
+      const response = await fetch(`/api/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ notarizationId: parts[0], providedHash: parts[1] }),
@@ -215,16 +251,14 @@ function App() {
 
   return (
     <div className="app-layout">
-      
+
       {/* Navbar matching screenshot */}
       <nav className="trustpass-navbar">
         <div className="nav-brand" onClick={handleBack}>
-          <div className="logo-icon" style={{ background: 'transparent', border: 'none', padding: 0 }}>
-            <img src={logoImg} alt="Secure Travel ID" style={{ height: '32px', objectFit: 'contain' }} />
-          </div>
+          <img src={logoImg} alt="Secure Travel ID" className="nav-logo" />
           Secure Travel ID
         </div>
-        
+
         <div className="nav-actions">
           <button className="icon-button" onClick={() => setView('overview')} title="Project Overview">
             <HelpCircle size={20} />
@@ -233,26 +267,26 @@ function App() {
       </nav>
 
       <main className="main-content">
-        
+
         {/* HOMEPAGE */}
         {view === 'home' && (
           <div className="home-layout">
             <div className="home-text-section">
-              <div className="fingerprint-icon" style={{ background: 'transparent', border: 'none' }}>
-                <img src={logoImg} alt="Secure Travel ID Logo" style={{ width: '64px', height: '64px', objectFit: 'contain' }} />
+              <div className="fingerprint-icon">
+                <img src={logoImg} alt="Secure Travel ID Logo" className="hero-logo" />
               </div>
-              <h1>Own your identity,<br/>notarize it on IOTA.</h1>
-              <p>Protect your sensitive documents (ID/Passport) with verifiable cryptographic proofs on the IOTA Tangle.</p>
+              <h1>Own your identity,<br />notarize it on IOTA.</h1>
+              <p>Protect your sensitive documents with verifiable cryptographic proofs on the IOTA Tangle.</p>
             </div>
-            
+
             <div className="home-card-section">
               <div className="action-card">
                 <button className="btn-primary" onClick={() => setView('client')}>
                   <Shield size={20} /> I am a Traveler
                 </button>
-                
+
                 <div className="divider">OR</div>
-                
+
                 <button className="btn-outline" onClick={() => setView('host')}>
                   <Focus size={20} color="var(--accent-gold)" /> I am a Host
                 </button>
@@ -278,10 +312,10 @@ function App() {
                   <h3>Tap to upload ID</h3>
                   <p>Image or PDF. We process this locally.</p>
                 </div>
-                <input 
-                  type="file" 
-                  ref={fileInputRef} 
-                  style={{ display: 'none' }} 
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  style={{ display: 'none' }}
                   onChange={handleFileUpload}
                 />
                 <div className="solid-info-box">
@@ -313,11 +347,11 @@ function App() {
                     {notarizedToken}
                   </p>
                   <button className="btn-outline" onClick={copyToClipboard} style={{ width: 'auto', padding: '0.75rem 1.5rem', margin: '0 auto' }}>
-                    {copied ? <CheckCircle size={18} /> : <Copy size={18} />} 
+                    {copied ? <CheckCircle size={18} /> : <Copy size={18} />}
                     {copied ? 'Copied!' : 'Copy Token'}
                   </button>
                 </div>
-                
+
                 <div className="solid-info-box" style={{ marginTop: '1.5rem' }}>
                   <Shield size={20} color="var(--success-color)" />
                   <span>Show this QR code to your host. They will verify your identity on-chain.</span>
@@ -337,20 +371,20 @@ function App() {
 
             {!validationResult && !isLoading && (
               <div className="host-scanner-container">
-                
+
                 {/* Custom Scanner UI */}
                 {!showManualInput ? (
                   <div className="scanner-presentation-box">
                     <div className="scanner-viewport-wrapper">
                       <div id="reader-custom" className={`scanner-viewport ${isScanning ? 'active' : ''}`}></div>
                       {!isScanning && (
-                         <div className="scanner-idle" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', background: '#000', justifyContent: 'center' }}>
-                           <Focus size={48} color="var(--accent-gold)" style={{ opacity: 0.6 }} />
-                           <p>Ready to verify identity</p>
-                         </div>
+                        <div className="scanner-idle" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', background: '#000', justifyContent: 'center' }}>
+                          <Focus size={48} color="var(--accent-gold)" style={{ opacity: 0.6 }} />
+                          <p>Ready to verify identity</p>
+                        </div>
                       )}
                     </div>
-                    
+
                     {!isScanning ? (
                       <button className="btn-primary" onClick={startScanner} style={{ width: '80%', margin: '0 auto 1.5rem', background: 'var(--accent-gold)', color: 'black' }}>
                         <Camera size={20} />
@@ -371,8 +405,8 @@ function App() {
                   <div className="manual-input-box">
                     <h3 style={{ margin: '0 0 1rem 0', fontWeight: '500' }}>Manual Entry</h3>
                     <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '1.5rem' }}>Paste the Secure Travel ID token provided by the traveler.</p>
-                    <input 
-                      className="input-area" 
+                    <input
+                      className="input-area"
                       style={{ padding: '1rem', marginBottom: '1rem' }}
                       value={hostInput}
                       onChange={e => setHostInput(e.target.value)}
@@ -388,14 +422,14 @@ function App() {
                     </div>
                   </div>
                 )}
-                
+
               </div>
             )}
 
             {isLoading && (
               <div style={{ textAlign: 'center', padding: '4rem 0' }}>
-                 <Loader2 size={48} className="loader" color="var(--accent-gold)" style={{ margin: '0 auto 1rem' }} />
-                 <p>Checking IOTA ledger...</p>
+                <Loader2 size={48} className="loader" color="var(--accent-gold)" style={{ margin: '0 auto 1rem' }} />
+                <p>Checking IOTA ledger...</p>
               </div>
             )}
 
@@ -407,12 +441,12 @@ function App() {
                 </h3>
                 <p style={{ margin: 0, opacity: 0.9 }}>{validationResult.msg}</p>
 
-                <button 
-                  className="btn-outline" 
+                <button
+                  className="btn-outline"
                   style={{ marginTop: '2rem', borderColor: 'currentColor', color: 'currentColor' }}
-                  onClick={() => { 
-                    setValidationResult(null); 
-                    setHostInput(''); 
+                  onClick={() => {
+                    setValidationResult(null);
+                    setHostInput('');
                     if (!showManualInput) startScanner();
                   }}
                 >
@@ -445,7 +479,7 @@ function App() {
                 <p>Secure Travel ID replaces raw document sharing with verifiable, untampered proofs notarized on the IOTA blockchain. Hosts verify a cryptographic guarantee instead of collecting JPEGs.</p>
               </div>
             </div>
-            
+
             <button className="btn-outline" style={{ marginTop: '3rem', width: 'max-content', padding: '1rem 2rem', margin: '3rem auto 0' }} onClick={handleBack}>
               Return to App
             </button>
